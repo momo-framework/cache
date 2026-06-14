@@ -16,47 +16,88 @@
 
 declare(strict_types=1);
 
-return [
-    /*
-     | Active store driver: 'array' (in-process, default), 'redis' or
-     | 'memcached'. Long-running multi-worker Swoole deployments need a shared
-     | store ('redis' recommended) so cache and tag invalidation are visible
-     | across workers; 'array' is per-process only.
-     */
-    'store' => 'array',
+return array(
 
-    /*
-     | Connection settings per shared driver. Used by StoreFactory when 'store'
-     | is 'redis' or 'memcached'.
-     */
-    'stores' => [
-        'redis' => [
-            'host'     => '127.0.0.1',
-            'port'     => 6379,
-            'database' => 0,
-            'password' => '',
-            'prefix'   => 'momo',
-        ],
-        'memcached' => [
-            'servers' => [
-                ['host' => '127.0.0.1', 'port' => 11211],
-            ],
-            'prefix' => 'momo',
-        ],
-    ],
+    // › Active Store Driver
+    // ─────────────────────────────────────────────────────────────────── ⚛ ───
+    //   Defines the primary storage engine blueprint for application caching.
+    //   In a multi-worker Swoole environment, this choice dictates whether
+    //   cache states are isolated per process memory space or globally shared.
+    //
+    //   ⚠ Using the "array" driver within a high-concurrency Swoole deployment
+    //   leads to state drift across isolated worker processes, as mutations
+    //   on one worker are completely invisible to concurrent coroutines running
+    //   on sister instances. Use "redis" for absolute state consistency.
+    //
+    //   Supported Options:
+    //     • "array"     - Ephemeral, in-memory process storage. Highly volatile.
+    //     • "redis"     - Shared external storage. Ideal for multi-worker runtimes.
+    //     • "memcached" - Distributed high-throughput memory object caching system.
+    //
 
-    /*
-     | Default TTL in seconds applied when a caller passes none. null = entries
-     | never expire unless explicitly evicted or invalidated by tag.
-     */
-    'default_ttl' => 3600,
+    'store' => env('CACHE_STORE', 'array'),
 
-    /*
-     | Reactive invalidation map: domain-event class => cache tags to flush when
-     | that event is published. The service provider subscribes the invalidation
-     | listener to each event listed here.
-     |
-     |   \App\Orders\Events\OrderShipped::class => ['orders', 'dashboard'],
-     */
-    'invalidation' => [],
-];
+    // › Connection Settings Per Shared Driver
+    // ─────────────────────────────────────────────────────────────────── ⚛ ───
+    //   Configures low-level connection parameters utilized by StoreFactory
+    //   to initialize backend storage connections. When executing under Swoole,
+    //   these configurations directly interact with the framework's internal
+    //   connection pooling engine, turning blocking I/O into non-blocking,
+    //   coroutine-aware networking hooks.
+    //
+    //   Supported Options:
+    //     • "array" - Multi-dimensional array structures defining host, port,
+    //                 passwords, and specific connection pooling capacities.
+    //
+
+    'stores' => array(
+        'redis' => array(
+            'host'     => env('REDIS_HOST', '127.0.0.1'),
+            'port'     => (int) env('REDIS_PORT', 6379),
+            'database' => (int) env('REDIS_DB', 0),
+            'password' => env('REDIS_PASSWORD', ''),
+            'prefix'   => env('REDIS_PREFIX', 'momo'),
+        ),
+        'memcached' => array(
+            'servers' => array(
+                array(
+                    'host' => env('MEMCACHED_HOST', '127.0.0.1'),
+                    'port' => (int) env('MEMCACHED_PORT', 11211),
+                ),
+            ),
+            'prefix' => env('MEMCACHED_PREFIX', 'momo'),
+        ),
+    ),
+
+    // › Default Time-To-Live
+    // ─────────────────────────────────────────────────────────────────── ⚛ ───
+    //   Establishes the default temporal lifespan (in seconds) for compiled
+    //   cache entries when an explicit expiration parameter is omitted during
+    //   the storage invocation.
+    //
+    //   ⚠ Setting this value to null will cause cache entries to persist
+    //   indefinitely within the storage driver, which can lead to severe
+    //   memory leak vectors and exhaustion of RAM pools in long-lived systems.
+    //
+    //   Supported Options:
+    //     • "int"  - Exact duration in seconds before automated record eviction.
+    //     • "null" - Infinite lifetime. Postpones eviction until manual purge.
+    //
+
+    'default_ttl' => (int) env('MOMO_CACHE_TTL', 3600),
+
+    // › Reactive Invalidation Map
+    // ─────────────────────────────────────────────────────────────────── ⚛ ───
+    //   Registers an architectural binding map linking asynchronous Domain Events
+    //   to explicit cache tags. The framework event listener intercepts these
+    //   dispatched events inside the coroutine event loop and programmatically
+    //   flushes corresponding cached data layers to prevent stale state reads.
+    //
+    //   Supported Options:
+    //     • "array" - Associative map where keys are fully qualified class names
+    //                 and values are arrays of targeting cache tags.
+    //
+
+    'invalidation' => array(),
+
+);

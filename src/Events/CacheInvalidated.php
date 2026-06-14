@@ -28,7 +28,7 @@ use Momo\Events\DomainEvent;
  * Emitted after the reactive listener flushed cache tags in response to a
  * domain event.
  */
-final class CacheInvalidated extends DomainEvent
+final readonly class CacheInvalidated extends DomainEvent
 {
     /**
      * @param class-string           $trigger the domain event class that caused the flush

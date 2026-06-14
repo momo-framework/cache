@@ -23,7 +23,7 @@ use Momo\Events\DomainEvent;
 /**
  * Domain-event fixture used to drive reactive cache invalidation.
  */
-final class OrderShippedEvent extends DomainEvent
+final readonly class OrderShippedEvent extends DomainEvent
 {
     /**
      * @param non-empty-string $orderId
