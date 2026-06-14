@@ -33,6 +33,7 @@ use Momo\Cache\Invalidation\CacheInvalidationListener;
 use Momo\Cache\Invalidation\InvalidationMap;
 use Momo\Cache\QueryCache;
 use Momo\Cache\Store\ArrayStore;
+use Momo\Cache\Store\StoreFactory;
 use Momo\Cache\Support\SystemClock;
 use Momo\Events\Contracts\DomainEventInterface;
 use Momo\Events\Contracts\EventBusInterface;
@@ -56,7 +57,7 @@ final class CacheServiceProvider extends ServiceProvider
 
         $this->singleton(
             CacheStoreInterface::class,
-            fn (): CacheStoreInterface => new ArrayStore($this->clock()),
+            fn (): CacheStoreInterface => $this->buildStore(),
         );
 
         $this->singleton(
@@ -149,6 +150,34 @@ final class CacheServiceProvider extends ServiceProvider
         }
 
         return $instance;
+    }
+
+    private function buildStore(): CacheStoreInterface
+    {
+        $driver = $this->stringConfig('cache.store', 'array');
+
+        if ($driver === '' || $driver === 'array') {
+            return new ArrayStore($this->clock());
+        }
+
+        return StoreFactory::make($driver, $this->arrayConfig('cache.stores.' . $driver));
+    }
+
+    private function stringConfig(string $key, string $default): string
+    {
+        $value = $this->app->getConfig($key, $default);
+
+        return \is_string($value) ? $value : $default;
+    }
+
+    /**
+     * @return array<array-key, mixed>
+     */
+    private function arrayConfig(string $key): array
+    {
+        $value = $this->app->getConfig($key, []);
+
+        return \is_array($value) ? $value : [];
     }
 
     private function clock(): ClockInterface

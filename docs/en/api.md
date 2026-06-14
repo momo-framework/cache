@@ -38,8 +38,18 @@ Implements `CacheInterface`; hashes keys then delegates to a store. A cached
   attribute's TTL and tags; otherwise runs `$compute()` uncached.
 
 ## Store (`Momo\Cache\Store`)
-- `ArrayStore` — process-local store with TTL and a tag → keys index.
 - `CacheEntry` *(final readonly)* — `value`, `expiresAt`; `isExpired(int $now): bool`.
+- `ArrayStore` — process-local store with TTL and a tag → keys index.
+- `RedisStore(RedisClientInterface $client, non-empty-string $namespace = 'momo')` —
+  shared store; tags via Redis sets.
+- `MemcachedStore(MemcachedClientInterface $client, non-empty-string $namespace = 'momo')` —
+  shared store; tags via per-tag member list.
+- `RedisClientInterface` / `MemcachedClientInterface` — minimal command surfaces
+  the stores depend on (fake-tested).
+- `PhpRedisClient` / `PhpMemcachedClient` — ext-redis / ext-memcached adapters
+  (UNVERIFIED; require the extensions, verified in CI).
+- `StoreFactory::make(non-empty-string $driver, array<array-key, mixed> $config): CacheStoreInterface`
+  — builds a Redis/Memcached store from config (UNVERIFIED).
 
 ## Hashing (`Momo\Cache\Hashing`)
 - `PhpXxHashKeyHasher` — `hash('xxh3', …)`.

@@ -5,8 +5,47 @@
 
 | Ключ           | Тип                                                        | По умолчанию | Значение                                         |
 |----------------|------------------------------------------------------------|--------------|--------------------------------------------------|
+| `store`        | `'array'\|'redis'\|'memcached'`                            | `array`      | Активный драйвер бэкенда.                          |
+| `stores`       | `array<string, array<string, mixed>>`                     | дефолты redis/memcached | Настройки подключения на драйвер.    |
 | `default_ttl`  | `int<1, max>\|null`                                        | `3600`       | TTL, если вызывающий не передал; null = без срока. |
 | `invalidation` | `array<class-string<DomainEventInterface>, list<non-empty-string>>` | `[]` | Класс события → теги для сброса при его срабатывании. |
+
+## Драйверы хранилища
+
+`CacheServiceProvider` связывает `CacheStoreInterface` из `cache.store`:
+
+- **`array`** (по умолчанию) — `ArrayStore`, в рамках процесса. Подходит для
+  одного воркера, CLI и тестов. Не разделяется между воркерами.
+- **`redis`** — `RedisStore` поверх `RedisClientInterface`. Разделяется между
+  воркерами и серверами; теги через Redis-сеты (атомарный `SADD`), TTL
+  обеспечивает Redis.
+- **`memcached`** — `MemcachedStore` поверх `MemcachedClientInterface`.
+  Разделяется; теги через список членов на тег (read-modify-write — см. заметку
+  про теги в докблоке класса; для строгой инвалидации под нагрузкой
+  предпочтительнее Redis).
+
+```php
+// config/cache.php
+'store'  => 'redis',
+'stores' => [
+    'redis' => [
+        'host'     => '127.0.0.1',
+        'port'     => 6379,
+        'database' => 0,
+        'password' => '',
+        'prefix'   => 'momo',   // namespace ключей, используется и в flush()
+    ],
+    'memcached' => [
+        'servers' => [['host' => '127.0.0.1', 'port' => 11211]],
+        'prefix'  => 'momo',
+    ],
+],
+```
+
+Адаптеры `PhpRedisClient` / `PhpMemcachedClient` требуют `ext-redis` /
+`ext-memcached`. Для неблокирующего I/O под Swoole включите
+`Swoole\Runtime::enableCoroutine()` (phpredis) или свяжите корутинный
+Redis-клиент.
 
 ## Карта реактивной инвалидации
 

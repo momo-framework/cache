@@ -18,6 +18,34 @@ declare(strict_types=1);
 
 return [
     /*
+     | Active store driver: 'array' (in-process, default), 'redis' or
+     | 'memcached'. Long-running multi-worker Swoole deployments need a shared
+     | store ('redis' recommended) so cache and tag invalidation are visible
+     | across workers; 'array' is per-process only.
+     */
+    'store' => 'array',
+
+    /*
+     | Connection settings per shared driver. Used by StoreFactory when 'store'
+     | is 'redis' or 'memcached'.
+     */
+    'stores' => [
+        'redis' => [
+            'host'     => '127.0.0.1',
+            'port'     => 6379,
+            'database' => 0,
+            'password' => '',
+            'prefix'   => 'momo',
+        ],
+        'memcached' => [
+            'servers' => [
+                ['host' => '127.0.0.1', 'port' => 11211],
+            ],
+            'prefix' => 'momo',
+        ],
+    ],
+
+    /*
      | Default TTL in seconds applied when a caller passes none. null = entries
      | never expire unless explicitly evicted or invalidated by tag.
      */

@@ -58,6 +58,36 @@ Map domain events to tags in `config/cache.php`:
 When `OrderShipped` is published on the Momo event bus, the listener flushes the
 `orders` tag and emits a `CacheInvalidated` event — no manual cache busting.
 
+## Store drivers
+
+The backend is abstracted behind `CacheStoreInterface`, selected by the
+`cache.store` config key:
+
+| Driver      | Class            | Scope                         | Tag invalidation            |
+|-------------|------------------|-------------------------------|-----------------------------|
+| `array`     | `ArrayStore`     | per-process (default)         | tag → keys index            |
+| `redis`     | `RedisStore`     | shared across workers/servers | Redis sets (atomic `SADD`)  |
+| `memcached` | `MemcachedStore` | shared across workers/servers | per-tag member list         |
+
+A long-running multi-worker Swoole deployment needs a **shared** store so cache
+entries and tag invalidation are visible across workers — `redis` is the
+recommended choice. `array` is per-process only.
+
+```php
+// config/cache.php
+'store'  => 'redis',
+'stores' => [
+    'redis' => ['host' => '127.0.0.1', 'port' => 6379, 'database' => 0, 'prefix' => 'shop'],
+],
+```
+
+Non-blocking I/O: the Redis driver works over a client interface — bind a
+phpredis adapter under `Swoole\Runtime::enableCoroutine()`, or a native
+`Swoole\Coroutine\Redis`, so socket calls yield the scheduler. The shipped
+`PhpRedisClient` / `PhpMemcachedClient` adapters require `ext-redis` /
+`ext-memcached` and are verified by CI integration jobs; the store logic itself
+is unit-tested against in-memory fakes.
+
 ## Native acceleration
 
 Cache keys are hashed with xxh3. `KeyHasherFactory` selects a native

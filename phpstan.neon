@@ -9,6 +9,13 @@ parameters:
         - src
         - tests
 
+    # UNVERIFIED ext adapters: require ext-redis / ext-memcached, absent here.
+    # Verified via CI integration jobs; store logic is covered through fakes.
+    excludePaths:
+        - src/Store/PhpRedisClient.php
+        - src/Store/PhpMemcachedClient.php
+        - src/Store/StoreFactory.php
+
     checkExplicitMixed: true
     checkFunctionNameCase: true
     reportUnmatchedIgnoredErrors: true

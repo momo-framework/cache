@@ -38,8 +38,18 @@
   атрибута; иначе выполняет `$compute()` без кэша.
 
 ## Store (`Momo\Cache\Store`)
-- `ArrayStore` — store в рамках процесса с TTL и индексом тег → ключи.
 - `CacheEntry` *(final readonly)* — `value`, `expiresAt`; `isExpired(int $now): bool`.
+- `ArrayStore` — store в рамках процесса с TTL и индексом тег → ключи.
+- `RedisStore(RedisClientInterface $client, non-empty-string $namespace = 'momo')` —
+  общий store; теги через Redis-сеты.
+- `MemcachedStore(MemcachedClientInterface $client, non-empty-string $namespace = 'momo')` —
+  общий store; теги через список членов на тег.
+- `RedisClientInterface` / `MemcachedClientInterface` — минимальные наборы команд,
+  от которых зависят сторы (покрыты фейками).
+- `PhpRedisClient` / `PhpMemcachedClient` — адаптеры ext-redis / ext-memcached
+  (UNVERIFIED; требуют расширений, проверяются в CI).
+- `StoreFactory::make(non-empty-string $driver, array<array-key, mixed> $config): CacheStoreInterface`
+  — строит Redis/Memcached store из конфига (UNVERIFIED).
 
 ## Hashing (`Momo\Cache\Hashing`)
 - `PhpXxHashKeyHasher` — `hash('xxh3', …)`.
