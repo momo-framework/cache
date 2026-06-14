@@ -1,8 +1,40 @@
-# momo/cache
+<div align="center">
+  <img src="https://avatars.githubusercontent.com/u/255415480?s=200&v=4" alt="Momo Framework" width="120" height="120" />
 
-Reactive cache with tag-based and **event-driven** invalidation — query results stay warm until a domain event makes them stale.
+  <h1>momo-framework/cache</h1>
 
-> 🇷🇺 Документация на русском: [README.ru.md](README.ru.md)
+  <p>
+      Reactive cache with tag-based invalidation for <a href="https://github.com/momo-framework">Momo Framework</a>.
+  </p>
+
+  <p>
+    <img src="https://github.com/momo-framework/cache/actions/workflows/ci.yml/badge.svg" alt="CI" />
+    <img src="https://img.shields.io/packagist/v/momo-framework/cache.svg?style=flat" alt="Latest Version" />
+    <img src="https://img.shields.io/packagist/dt/momo-framework/cache.svg?style=flat" alt="Total Downloads" />
+    <img src="https://img.shields.io/badge/php-%3E%3D8.5-8892bf.svg" alt="PHP Version" />
+    <img src="https://img.shields.io/badge/license-AGPL--3.0-blue.svg" alt="License" />
+    <img src="https://img.shields.io/badge/coverage-100%25-brightgreen.svg" alt="Coverage" />
+    <img src="https://img.shields.io/badge/PHPStan-level%2010-brightblue.svg" alt="PHPStan" />
+  </p>
+  <p>🇬🇧 English &nbsp;·&nbsp; 🇷🇺 <a href="README.ru.md">Русская версия</a></p>
+</div>
+
+---
+
+## Overview
+
+`momo-framework/cache` is the caching layer for Momo Framework. It provides a unified `CacheInterface` backed by pluggable store drivers (Array, Redis, Memcached) and exposes a reactive invalidation system that wires domain events directly to cache eviction — no polling, no stale reads.
+
+Keys are always hashed through a `KeyHasherInterface` (xxHash by default) before reaching the store, keeping backend key spaces clean and collision-resistant regardless of the logical key format your application uses.
+
+The package ships with `QueryCache`, a lightweight decorator for CQRS query handlers. When a handler is annotated with `#[Cached]`, its result is transparently memoised and evicted the moment a relevant domain event fires — without the handler needing to know anything about caching.
+
+## Requirements
+
+- PHP >= 8.5
+- For Redis store: `ext-redis`
+- For Memcached store: `ext-memcached`
+- For xxHash: `ext-xxhash` (falls back to `md5` automatically)
 
 ## Installation
 
@@ -10,96 +42,169 @@ Reactive cache with tag-based and **event-driven** invalidation — query result
 composer require momo-framework/cache
 ```
 
-`CacheServiceProvider` is auto-discovered. It binds `CacheInterface`,
-`CacheStoreInterface`, `KeyHasherInterface`, `QueryCache`, the `CachedReader`,
-the `InvalidationMap` and the reactive `CacheInvalidationListener`.
+## Core Concepts
 
-## Quick Start
+### CacheInterface
+
+The primary facade. All cache operations go through it:
 
 ```php
-// Read-through caching
-$user = $cache->remember("user:{$id}", ttl: 60, callback: fn () => $repo->find($id), tags: ['users']);
+use Momo\Cache\Contracts\CacheInterface;
 
-// Plain set/get
-$cache->set('flag', true, ttl: 30);
-$cache->get('flag', default: false);
+$cache->set('user:42', $user, ttl: 3600, tags: ['users']);
+$cache->get('user:42');
+$cache->has('user:42');
+$cache->delete('user:42');
 
-// Tag invalidation
+// Store-or-compute in one call (type-safe via generics)
+$user = $cache->remember('user:42', ttl: 3600, callback: fn () => $repo->find(42), tags: ['users']);
+
+// Evict all entries carrying a tag
 $cache->invalidateTag('users');
+$cache->invalidateTags(['users', 'products']);
 ```
 
-## `#[Cached]` query handlers
+### Key Hashing
 
-Annotate a query handler and wrap its dispatch with `QueryCache`:
+Every logical key is run through `KeyHasherInterface` before hitting the store. The default implementation uses xxHash (fast, non-cryptographic):
+
+```php
+use Momo\Cache\Contracts\KeyHasherInterface;
+
+$hasher = $container->make(KeyHasherInterface::class);
+$hashed = $hasher->hash('user:42:profile'); // e.g. "a3f1c9..."
+```
+
+You never need to hash manually — `Cache` does it for you.
+
+### #[Cached] Attribute
+
+Annotate a CQRS query handler to cache its result automatically:
 
 ```php
 use Momo\Cache\Attributes\Cached;
 
-#[Cached(ttl: 60, tags: ['orders'])]
-final class GetOrderHandler { /* ... */ }
-
-// In a query-bus decorator:
-$result = $queryCache->remember($handler, $query, fn () => $handler->handle($query));
+#[Cached(ttl: 300, tags: ['products'])]
+final class ListProductsHandler
+{
+    public function handle(ListProductsQuery $query): array
+    {
+        return $this->repository->findAll();
+    }
+}
 ```
 
-The cache key is derived from the query's class and value, so distinct queries
-cache independently.
+`QueryCache` wraps handler dispatch: on a cache miss it calls the handler and stores the result; on a hit it returns the cached value immediately.
 
-## Reactive invalidation
+### Reactive Invalidation
 
-Map domain events to tags in `config/cache.php`:
+Map domain events to cache tags in `config/cache.php`:
 
 ```php
 'invalidation' => [
-    \App\Orders\Events\OrderShipped::class => ['orders'],
+    \App\Catalog\Events\ProductUpdated::class => ['products'],
+    \App\Catalog\Events\ProductDeleted::class => ['products'],
+    \App\Orders\Events\OrderPlaced::class     => ['orders', 'inventory'],
 ],
 ```
 
-When `OrderShipped` is published on the Momo event bus, the listener flushes the
-`orders` tag and emits a `CacheInvalidated` event — no manual cache busting.
+`CacheInvalidationListener` subscribes to each registered event. When `ProductUpdated` fires, every cache entry tagged `products` is flushed automatically without a separate job.
 
-## Store drivers
-
-The backend is abstracted behind `CacheStoreInterface`, selected by the
-`cache.store` config key:
-
-| Driver      | Class            | Scope                         | Tag invalidation            |
-|-------------|------------------|-------------------------------|-----------------------------|
-| `array`     | `ArrayStore`     | per-process (default)         | tag → keys index            |
-| `redis`     | `RedisStore`     | shared across workers/servers | Redis sets (atomic `SADD`)  |
-| `memcached` | `MemcachedStore` | shared across workers/servers | per-tag member list         |
-
-A long-running multi-worker Swoole deployment needs a **shared** store so cache
-entries and tag invalidation are visible across workers — `redis` is the
-recommended choice. `array` is per-process only.
+You can also build the map programmatically:
 
 ```php
-// config/cache.php
-'store'  => 'redis',
-'stores' => [
-    'redis' => ['host' => '127.0.0.1', 'port' => 6379, 'database' => 0, 'prefix' => 'shop'],
-],
+use Momo\Cache\Invalidation\InvalidationMap;
+
+$map->register(ProductUpdated::class, ['products']);
+$map->register(OrderPlaced::class, ['orders', 'inventory']);
 ```
 
-Non-blocking I/O: the Redis driver works over a client interface — bind a
-phpredis adapter under `Swoole\Runtime::enableCoroutine()`, or a native
-`Swoole\Coroutine\Redis`, so socket calls yield the scheduler. The shipped
-`PhpRedisClient` / `PhpMemcachedClient` adapters require `ext-redis` /
-`ext-memcached` and are verified by CI integration jobs; the store logic itself
-is unit-tested against in-memory fakes.
+## Usage
 
-## Native acceleration
+### Basic get / set / remember
 
-Cache keys are hashed with xxh3. `KeyHasherFactory` selects a native
-`momo_cache` accelerator when present (matching `MOMO_CACHE_EXT_VERSION`),
-falling back to the pure-PHP `PhpXxHashKeyHasher` otherwise.
+```php
+use Momo\Cache\Cache;
+use Momo\Cache\Store\ArrayStore;
+use Momo\Cache\Hashing\PhpXxHashKeyHasher;
 
-## Documentation
+$store  = new ArrayStore();
+$hasher = new PhpXxHashKeyHasher();
+$cache  = new Cache($store, $hasher);
 
-- [Overview](docs/en/overview.md)
-- [API reference](docs/en/api.md)
-- [Configuration](docs/en/configuration.md)
+// Store for 60 seconds, tagged "users"
+$cache->set('user:1', ['name' => 'Alice'], ttl: 60, tags: ['users']);
 
-## License
+// Fetch — returns null on miss
+$user = $cache->get('user:1');
 
-AGPL-3.0-or-later.
+// Store-or-compute
+$user = $cache->remember('user:1', ttl: 60, callback: function () use ($repo) {
+    return $repo->findById(1);
+}, tags: ['users']);
+```
+
+### Redis store
+
+```php
+use Momo\Cache\Store\RedisStore;
+use Momo\Cache\Store\PhpRedisClient;
+
+$redis = new PhpRedisClient(host: '127.0.0.1', port: 6379, prefix: 'momo');
+$store = new RedisStore($redis);
+```
+
+### QueryCache with a bus decorator
+
+```php
+use Momo\Cache\QueryCache;
+use Momo\Cache\Attributes\CachedReader;
+
+$queryCache = new QueryCache($cache, new CachedReader());
+
+// Wrap handler dispatch in your query bus middleware:
+$result = $queryCache->remember($handler, $query, fn () => $handler->handle($query));
+```
+
+## Configuration
+
+`config/cache.php` is published automatically by `CacheServiceProvider`:
+
+```php
+return [
+    'store' => env('CACHE_STORE', 'array'), // array | redis | memcached
+
+    'stores' => [
+        'redis' => [
+            'host'     => env('REDIS_HOST', '127.0.0.1'),
+            'port'     => (int) env('REDIS_PORT', 6379),
+            'database' => (int) env('REDIS_DB', 0),
+            'password' => env('REDIS_PASSWORD', ''),
+            'prefix'   => env('REDIS_PREFIX', 'momo'),
+        ],
+        'memcached' => [
+            'servers' => [
+                ['host' => env('MEMCACHED_HOST', '127.0.0.1'), 'port' => (int) env('MEMCACHED_PORT', 11211)],
+            ],
+            'prefix' => env('MEMCACHED_PREFIX', 'momo'),
+        ],
+    ],
+
+    'default_ttl' => (int) env('MOMO_CACHE_TTL', 3600),
+
+    // Domain event → cache tag mapping (reactive invalidation)
+    'invalidation' => [],
+];
+```
+
+> **Swoole note:** the `array` store is per-worker and is suitable only for single-worker setups or local caches. Use `redis` in multi-worker production deployments to share state across workers.
+
+## Development
+
+```bash
+composer lint          # Code style check
+composer stan          # PHPStan level 10
+composer rector:check  # Rector dry-run
+composer test          # Run tests
+composer ci            # Run all checks
+```
